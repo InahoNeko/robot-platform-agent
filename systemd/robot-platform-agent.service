@@ -1,0 +1,25 @@
+[Unit]
+Description=Robot Platform Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+WorkingDirectory=/agibot/flag/agent/current
+
+ExecStart=/bin/bash /agibot/flag/agent/current/start.sh
+
+Restart=always
+RestartSec=5
+
+User=root
+
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
