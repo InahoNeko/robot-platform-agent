@@ -11,7 +11,7 @@ set -e
 # Configuration
 # ------------------------------------------------------------
 
-GITHUB_OWNER="YOUR_GITHUB_USERNAME"
+GITHUB_OWNER="InahoNeko"
 GITHUB_REPO="robot-platform-agent"
 
 APP_NAME="robot-platform-agent"
@@ -20,12 +20,13 @@ INSTALL_ROOT="/agibot/flag/agent"
 VERSIONS_DIR="${INSTALL_ROOT}/versions"
 CURRENT_LINK="${INSTALL_ROOT}/current"
 CONFIG_DIR="${INSTALL_ROOT}/config"
+DATA_DIR="${INSTALL_ROOT}/data"
 BACKUP_DIR="${INSTALL_ROOT}/backup"
 
 SERVICE_NAME="robot-platform-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-API_URL="https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest"
+RELEASES_API_URL="https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases"
 
 TEMP_DIR="$(mktemp -d)"
 
@@ -109,6 +110,11 @@ if ! command -v systemctl >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+    error "python3 is required."
+    exit 1
+fi
+
 ok "Dependencies available."
 
 
@@ -132,37 +138,198 @@ ok "ROS 2 Humble found."
 mkdir -p "${INSTALL_ROOT}"
 mkdir -p "${VERSIONS_DIR}"
 mkdir -p "${CONFIG_DIR}"
+mkdir -p "${DATA_DIR}"
 mkdir -p "${BACKUP_DIR}"
 
 
 # ============================================================
-# Get latest GitHub release
+# Get GitHub Releases
 # ============================================================
 
-log "Checking latest Agent release..."
+log "Checking GitHub Releases..."
 
-RELEASE_JSON="${TEMP_DIR}/release.json"
+RELEASES_JSON="${TEMP_DIR}/releases.json"
 
-curl -fsSL \
+if ! curl -fsSL \
     --retry 3 \
     --connect-timeout 10 \
-    "${API_URL}" \
-    -o "${RELEASE_JSON}"
+    --max-time 30 \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "${RELEASES_API_URL}" \
+    -o "${RELEASES_JSON}"; then
 
-LATEST_TAG="$(
-    grep '"tag_name":' "${RELEASE_JSON}" |
-    head -n 1 |
-    sed -E 's/.*"tag_name": "([^"]+)".*/\1/'
-)"
-
-if [ -z "${LATEST_TAG}" ]; then
-    error "Unable to determine latest release."
+    error "Failed to query GitHub Releases."
+    error "URL: ${RELEASES_API_URL}"
     exit 1
 fi
 
+
+# ============================================================
+# Validate GitHub API response
+# ============================================================
+
+if ! python3 - "${RELEASES_JSON}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as file:
+    data = json.load(file)
+
+if not isinstance(data, list):
+    raise SystemExit(1)
+PY
+then
+    error "Invalid GitHub Releases response."
+    exit 1
+fi
+
+
+# ============================================================
+# Find latest stable release
+# ============================================================
+
+LATEST_RELEASE_INFO="$(
+    python3 - "${RELEASES_JSON}" <<'PY'
+import json
+import sys
+import re
+
+
+def version_key(tag):
+    """
+    Convert v1.2.3 into a sortable tuple.
+    """
+
+    value = tag.strip()
+
+    if value.startswith(("v", "V")):
+        value = value[1:]
+
+    match = re.match(
+        r"^(\d+)\.(\d+)\.(\d+)$",
+        value,
+    )
+
+    if not match:
+        return None
+
+    return tuple(
+        int(part)
+        for part in match.groups()
+    )
+
+
+with open(sys.argv[1], "r", encoding="utf-8") as file:
+    releases = json.load(file)
+
+candidates = []
+
+for release in releases:
+
+    if release.get("draft"):
+        continue
+
+    if release.get("prerelease"):
+        continue
+
+    tag_name = release.get("tag_name")
+
+    if not tag_name:
+        continue
+
+    version = version_key(tag_name)
+
+    if version is None:
+        continue
+
+    candidates.append(
+        (
+            version,
+            tag_name,
+            release,
+        )
+    )
+
+
+if not candidates:
+    raise SystemExit(1)
+
+
+candidates.sort(
+    key=lambda item: item[0],
+    reverse=True,
+)
+
+version, tag_name, release = candidates[0]
+
+print(tag_name)
+print(release.get("id", ""))
+PY
+)"
+
+if [ -z "${LATEST_RELEASE_INFO}" ]; then
+    error "No stable semantic-version GitHub Release found."
+    error "Expected release tag format: v0.1.0"
+    exit 1
+fi
+
+LATEST_TAG="$(echo "${LATEST_RELEASE_INFO}" | sed -n '1p')"
+LATEST_RELEASE_ID="$(echo "${LATEST_RELEASE_INFO}" | sed -n '2p')"
+
 LATEST_VERSION="${LATEST_TAG#v}"
 
-log "Latest release: ${LATEST_TAG}"
+log "Latest stable release: ${LATEST_TAG}"
+
+
+# ============================================================
+# Get release information for selected version
+# ============================================================
+
+RELEASE_JSON="${TEMP_DIR}/release.json"
+
+if ! python3 - "${RELEASES_JSON}" "${LATEST_TAG}" "${RELEASE_JSON}" <<'PY'
+import json
+import sys
+
+releases_file = sys.argv[1]
+tag_name = sys.argv[2]
+output_file = sys.argv[3]
+
+with open(releases_file, "r", encoding="utf-8") as file:
+    releases = json.load(file)
+
+for release in releases:
+
+    if release.get("tag_name") != tag_name:
+        continue
+
+    if release.get("draft"):
+        continue
+
+    if release.get("prerelease"):
+        continue
+
+    with open(
+        output_file,
+        "w",
+        encoding="utf-8",
+    ) as output:
+        json.dump(
+            release,
+            output,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+then
+    error "Unable to locate selected release: ${LATEST_TAG}"
+    exit 1
+fi
 
 
 # ============================================================
@@ -172,8 +339,11 @@ log "Latest release: ${LATEST_TAG}"
 CURRENT_VERSION=""
 
 if [ -L "${CURRENT_LINK}" ]; then
+
     CURRENT_TARGET="$(readlink "${CURRENT_LINK}")"
+
     CURRENT_VERSION="$(basename "${CURRENT_TARGET}")"
+
 fi
 
 if [ -n "${CURRENT_VERSION}" ]; then
@@ -196,6 +366,7 @@ if [ "${CURRENT_VERSION}" = "${LATEST_VERSION}" ]; then
     echo
 
     exit 0
+
 fi
 
 
@@ -206,19 +377,43 @@ fi
 PACKAGE_NAME="${APP_NAME}-v${LATEST_VERSION}.tar.gz"
 CHECKSUM_NAME="${PACKAGE_NAME}.sha256"
 
-PACKAGE_URL="$(
-    grep '"browser_download_url":' "${RELEASE_JSON}" |
-    grep "${PACKAGE_NAME}" |
-    head -n 1 |
-    sed -E 's/.*"browser_download_url": "([^"]+)".*/\1/'
+ASSET_INFO="$(
+    python3 - "${RELEASE_JSON}" "${PACKAGE_NAME}" "${CHECKSUM_NAME}" <<'PY'
+import json
+import sys
+
+release_file = sys.argv[1]
+package_name = sys.argv[2]
+checksum_name = sys.argv[3]
+
+with open(
+    release_file,
+    "r",
+    encoding="utf-8",
+) as file:
+    release = json.load(file)
+
+package_url = ""
+checksum_url = ""
+
+for asset in release.get("assets", []):
+
+    name = asset.get("name", "")
+    url = asset.get("browser_download_url", "")
+
+    if name == package_name:
+        package_url = url
+
+    elif name == checksum_name:
+        checksum_url = url
+
+print(package_url)
+print(checksum_url)
+PY
 )"
 
-CHECKSUM_URL="$(
-    grep '"browser_download_url":' "${RELEASE_JSON}" |
-    grep "${CHECKSUM_NAME}" |
-    head -n 1 |
-    sed -E 's/.*"browser_download_url": "([^"]+)".*/\1/'
-)"
+PACKAGE_URL="$(echo "${ASSET_INFO}" | sed -n '1p')"
+CHECKSUM_URL="$(echo "${ASSET_INFO}" | sed -n '2p')"
 
 if [ -z "${PACKAGE_URL}" ]; then
     error "Agent package not found in release."
@@ -231,6 +426,8 @@ if [ -z "${CHECKSUM_URL}" ]; then
     error "Expected: ${CHECKSUM_NAME}"
     exit 1
 fi
+
+ok "Release assets found."
 
 
 # ============================================================
@@ -246,6 +443,7 @@ log "Downloading ${PACKAGE_NAME}..."
 curl -fL \
     --retry 3 \
     --connect-timeout 10 \
+    --max-time 300 \
     "${PACKAGE_URL}" \
     -o "${PACKAGE_FILE}"
 
@@ -261,6 +459,7 @@ log "Downloading SHA256 checksum..."
 curl -fL \
     --retry 3 \
     --connect-timeout 10 \
+    --max-time 60 \
     "${CHECKSUM_URL}" \
     -o "${CHECKSUM_FILE}"
 
@@ -273,10 +472,8 @@ ok "Checksum downloaded."
 
 log "Verifying package integrity..."
 
-cd "${TEMP_DIR}"
-
 EXPECTED_CHECKSUM="$(
-    awk '{print $1}' "${CHECKSUM_FILE}"
+    awk 'NF {print $1; exit}' "${CHECKSUM_FILE}"
 )"
 
 ACTUAL_CHECKSUM="$(
@@ -284,11 +481,19 @@ ACTUAL_CHECKSUM="$(
     awk '{print $1}'
 )"
 
+if [ -z "${EXPECTED_CHECKSUM}" ]; then
+    error "Invalid SHA256 file."
+    exit 1
+fi
+
 if [ "${EXPECTED_CHECKSUM}" != "${ACTUAL_CHECKSUM}" ]; then
+
     error "SHA256 verification failed."
     error "Expected: ${EXPECTED_CHECKSUM}"
     error "Actual:   ${ACTUAL_CHECKSUM}"
+
     exit 1
+
 fi
 
 ok "SHA256 verification passed."
@@ -301,7 +506,7 @@ ok "SHA256 verification passed."
 NEW_VERSION_DIR="${VERSIONS_DIR}/${LATEST_VERSION}"
 
 if [ -d "${NEW_VERSION_DIR}" ]; then
-    log "Removing incomplete existing version..."
+    log "Removing existing version directory..."
     rm -rf "${NEW_VERSION_DIR}"
 fi
 
@@ -319,24 +524,36 @@ tar -xzf \
     -C "${NEW_VERSION_DIR}" \
     --strip-components=1
 
-chmod +x "${NEW_VERSION_DIR}/start.sh"
-
 
 # ============================================================
 # Verify required files
 # ============================================================
 
 if [ ! -f "${NEW_VERSION_DIR}/main.py" ]; then
-    error "main.py not found."
+    error "main.py not found in package."
+    rm -rf "${NEW_VERSION_DIR}"
+    exit 1
+fi
+
+if [ ! -f "${NEW_VERSION_DIR}/mc.py" ]; then
+    error "mc.py not found in package."
+    rm -rf "${NEW_VERSION_DIR}"
+    exit 1
+fi
+
+if [ ! -f "${NEW_VERSION_DIR}/event_store.py" ]; then
+    error "event_store.py not found in package."
     rm -rf "${NEW_VERSION_DIR}"
     exit 1
 fi
 
 if [ ! -f "${NEW_VERSION_DIR}/start.sh" ]; then
-    error "start.sh not found."
+    error "start.sh not found in package."
     rm -rf "${NEW_VERSION_DIR}"
     exit 1
 fi
+
+chmod +x "${NEW_VERSION_DIR}/start.sh"
 
 ok "Agent package verified."
 
@@ -345,26 +562,42 @@ ok "Agent package verified."
 # Preserve config
 # ============================================================
 
-# First installation:
-# Copy config.json from package to persistent config directory.
-
 if [ ! -f "${CONFIG_DIR}/config.json" ]; then
 
     if [ -f "${NEW_VERSION_DIR}/config.json" ]; then
+
         cp \
             "${NEW_VERSION_DIR}/config.json" \
             "${CONFIG_DIR}/config.json"
 
         ok "Initial configuration installed."
+
     else
+
         warn "No config.json found in package."
+        warn "Please create:"
+        warn "${CONFIG_DIR}/config.json"
+
     fi
+
+else
+
+    log "Existing configuration preserved."
 
 fi
 
 
 # ============================================================
-# Prepare systemd service
+# Preserve offline database
+# ============================================================
+
+if [ -f "${DATA_DIR}/offline.db" ]; then
+    log "Existing offline database preserved."
+fi
+
+
+# ============================================================
+# Install systemd service
 # ============================================================
 
 log "Installing systemd service..."
@@ -444,7 +677,9 @@ ok "Current version -> ${LATEST_VERSION}"
 
 log "Starting Agent ${LATEST_VERSION}..."
 
-systemctl start "${SERVICE_NAME}"
+if ! systemctl start "${SERVICE_NAME}"; then
+    warn "systemctl start returned an error."
+fi
 
 
 # ============================================================
@@ -460,8 +695,10 @@ for i in $(seq 1 10); do
     sleep 1
 
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
+
         HEALTH_OK=true
         break
+
     fi
 
 done
@@ -502,6 +739,22 @@ fi
 
 error "Agent ${LATEST_VERSION} failed to start."
 
+echo
+warn "Collecting recent Agent logs..."
+echo
+
+journalctl \
+    -u "${SERVICE_NAME}" \
+    -n 50 \
+    --no-pager
+
+echo
+
+
+# ============================================================
+# Rollback
+# ============================================================
+
 if [ -n "${OLD_VERSION}" ] &&
    [ -d "${VERSIONS_DIR}/${OLD_VERSION}" ]; then
 
@@ -514,15 +767,25 @@ if [ -n "${OLD_VERSION}" ] &&
         "${VERSIONS_DIR}/${OLD_VERSION}" \
         "${CURRENT_LINK}"
 
-    systemctl start "${SERVICE_NAME}"
+    if systemctl start "${SERVICE_NAME}"; then
 
-    sleep 3
+        sleep 3
 
-    if systemctl is-active --quiet "${SERVICE_NAME}"; then
-        ok "Rollback successful."
-        warn "Restored Agent ${OLD_VERSION}."
+        if systemctl is-active --quiet "${SERVICE_NAME}"; then
+
+            ok "Rollback successful."
+            warn "Restored Agent ${OLD_VERSION}."
+
+        else
+
+            error "Rollback Agent is not running."
+
+        fi
+
     else
-        error "Rollback failed."
+
+        error "Failed to start rollback Agent."
+
     fi
 
 else
@@ -534,18 +797,21 @@ fi
 
 
 # ============================================================
-# Error information
+# Final error
 # ============================================================
 
 echo
-echo "Recent Agent logs:"
+echo "============================================================"
+echo " Installation failed"
+echo "============================================================"
 echo
-
-journalctl \
-    -u "${SERVICE_NAME}" \
-    -n 50 \
-    --no-pager
-
+echo "Current version : ${LATEST_VERSION}"
+echo "Previous version: ${OLD_VERSION:-none}"
+echo
+echo "Check logs:"
+echo "  journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
+echo
+echo "============================================================"
 echo
 
 exit 1
