@@ -4,7 +4,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-INSTALL_ROOT="/agibot/flag/agent"
+INSTALL_ROOT="/agibot/data/var/agent"
 CONFIG_FILE="${INSTALL_ROOT}/config/config.json"
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-DB_FILE = Path("/agibot/flag/agent/data/offline.db")
+DB_FILE = Path("/agibot/data/var/agent/data/offline.db")
 
 
 class EventStore:

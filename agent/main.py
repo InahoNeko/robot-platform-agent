@@ -16,7 +16,7 @@ from mc import start_mc_collector
 # ============================================================
 
 CONFIG_FILE = Path(
-    "/agibot/flag/agent/config/config.json"
+    "/agibot/data/var/agent/config/config.json"
 )
 
 SN_FILE = Path(
