@@ -1,0 +1,4 @@
+{
+    "backend_url": "http://172.21.85.12:8000",
+    "heartbeat_interval": 5
+}

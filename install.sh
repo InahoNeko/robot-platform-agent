@@ -16,7 +16,7 @@ GITHUB_REPO="robot-platform-agent"
 
 APP_NAME="robot-platform-agent"
 
-INSTALL_ROOT="/agibot/flag/agent"
+INSTALL_ROOT="/agibot/data/var/agent"
 VERSIONS_DIR="${INSTALL_ROOT}/versions"
 CURRENT_LINK="${INSTALL_ROOT}/current"
 CONFIG_DIR="${INSTALL_ROOT}/config"
