@@ -472,28 +472,69 @@ ok "Checksum downloaded."
 
 log "Verifying package integrity..."
 
-EXPECTED_CHECKSUM="$(
-    awk 'NF {print $1; exit}' "${CHECKSUM_FILE}"
-)"
-
-ACTUAL_CHECKSUM="$(
-    sha256sum "${PACKAGE_FILE}" |
-    awk '{print $1}'
-)"
-
-if [ -z "${EXPECTED_CHECKSUM}" ]; then
-    error "Invalid SHA256 file."
+if [ ! -f "${PACKAGE_FILE}" ]; then
+    error "Downloaded package does not exist."
+    error "File: ${PACKAGE_FILE}"
     exit 1
 fi
 
-if [ "${EXPECTED_CHECKSUM}" != "${ACTUAL_CHECKSUM}" ]; then
-
-    error "SHA256 verification failed."
-    error "Expected: ${EXPECTED_CHECKSUM}"
-    error "Actual:   ${ACTUAL_CHECKSUM}"
-
+if [ ! -s "${PACKAGE_FILE}" ]; then
+    error "Downloaded package is empty."
+    error "File: ${PACKAGE_FILE}"
     exit 1
+fi
 
+if [ ! -f "${CHECKSUM_FILE}" ]; then
+    error "Downloaded SHA256 file does not exist."
+    error "File: ${CHECKSUM_FILE}"
+    exit 1
+fi
+
+if [ ! -s "${CHECKSUM_FILE}" ]; then
+    error "Downloaded SHA256 file is empty."
+    error "File: ${CHECKSUM_FILE}"
+    exit 1
+fi
+
+EXPECTED_CHECKSUM="$(awk 'NF {print $1; exit}' "${CHECKSUM_FILE}")"
+
+if [ -z "${EXPECTED_CHECKSUM}" ]; then
+    error "Unable to read expected SHA256."
+    echo
+    cat "${CHECKSUM_FILE}"
+    echo
+    exit 1
+fi
+
+if ! echo "${EXPECTED_CHECKSUM}" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+    error "Invalid SHA256 value:"
+    error "${EXPECTED_CHECKSUM}"
+    echo
+    echo "Checksum file content:"
+    cat "${CHECKSUM_FILE}"
+    echo
+    exit 1
+fi
+
+if ! ACTUAL_CHECKSUM="$(sha256sum "${PACKAGE_FILE}" | awk '{print $1}')"; then
+    error "Failed to calculate SHA256 of downloaded package."
+    error "File: ${PACKAGE_FILE}"
+    exit 1
+fi
+
+if [ -z "${ACTUAL_CHECKSUM}" ]; then
+    error "SHA256 calculation returned an empty result."
+    exit 1
+fi
+
+echo
+echo "Expected SHA256: ${EXPECTED_CHECKSUM}"
+echo "Actual SHA256:   ${ACTUAL_CHECKSUM}"
+echo
+
+if [ "${EXPECTED_CHECKSUM}" != "${ACTUAL_CHECKSUM}" ]; then
+    error "SHA256 verification failed."
+    exit 1
 fi
 
 ok "SHA256 verification passed."
