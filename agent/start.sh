@@ -150,7 +150,7 @@ python3 -c "import rclpy" 2>/dev/null || {
     exit 1
 }
 
-if ! python3 -c "from aimdk_msgs.msg import EventProbeInfoArray" 2>/dev/null; then
+if ! python3 -c "from aimdk_msgs.srv import GetMcAction" 2>/dev/null; then
     echo "[WARN] aimdk_msgs not available;"
     echo "       MC motion-state collection will be disabled."
 fi

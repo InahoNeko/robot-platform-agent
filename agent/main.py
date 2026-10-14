@@ -4,11 +4,16 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock, Thread
+from typing import Optional
 
 import requests
 
 from event_store import EventStore
-from mc import start_mc_collector
+from mc import (
+    MC_SERVICE,
+    MC_STATE_SEPARATOR,
+    start_mc_collector,
+)
 
 
 # ============================================================
@@ -177,12 +182,42 @@ def now_iso() -> str:
     ).isoformat()
 
 
+def _split_mc_state(
+    state: str,
+) -> tuple[str, Optional[str]]:
+    """
+    拆分 mc.py 上报的复合状态。
+
+    mc.py 上报形如：
+
+        RUNNING | LOCOMOTION_DEFAULT
+
+    前段是 MC 运动状态名（IDLE / RUNNING / TRANSITION），
+    后段是运动模式描述。
+
+    平台的状态字典（state_labels）与项目 active_states 都按
+    运动模式取值统计，因此心跳 / state 事件上报只取后段，
+    前段单独放进 payload.mc_status。
+    """
+
+    status_name, separator, action_desc = state.partition(
+        MC_STATE_SEPARATOR
+    )
+
+    if separator and action_desc.strip():
+        return action_desc.strip(), (status_name.strip() or None)
+
+    return state.strip(), None
+
+
 def on_mc_state_change(state: str):
 
     global _runtime_state
 
+    action_state, _ = _split_mc_state(state)
+
     with _runtime_state_lock:
-        _runtime_state = state
+        _runtime_state = action_state
 
     print(
         f"[MC] Current action state: {state}"
@@ -344,14 +379,23 @@ def record_state_change(
     state: str,
 ):
 
+    action_state, status_name = _split_mc_state(state)
+
     event_time = now_iso()
 
     payload = {
         "sn": ROBOT_SN,
-        "state": state,
-        "source": "mc_event_probe",
-        "event_id": 5004,
+        # 平台状态字典 / active_states 使用的行动态。
+        "state": action_state,
+        # 数据来源：GetMcAction 服务轮询
+        # （旧版本从 MC 事件探针 event_id=5004 订阅）。
+        "source": "mc_service",
+        "service": MC_SERVICE,
+        "raw_state": state,
     }
+
+    if status_name:
+        payload["mc_status"] = status_name
 
     event_store.append(
         event_type="state",
@@ -360,7 +404,7 @@ def record_state_change(
     )
 
     print(
-        f"[LocalStore] State saved: {state}"
+        f"[LocalStore] State saved: {action_state}"
     )
 
 

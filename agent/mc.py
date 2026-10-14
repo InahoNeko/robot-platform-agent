@@ -4,164 +4,183 @@ from typing import Callable, Optional
 import rclpy
 from rclpy.node import Node
 
-# aimdk_msgs 由机器人环境提供。
-# 在普通 Jazzy 开发机上可能未安装，或为其他 ROS 发行版构建，
-# 此时不阻断 Agent 启动，仅关闭 MC 状态采集。
 try:
-    from aimdk_msgs.msg import EventProbeInfoArray
+    from aimdk_msgs.srv import GetMcAction
 
     AIMDK_IMPORT_ERROR = None
-
 except ImportError as exc:
-
-    EventProbeInfoArray = None
-
+    GetMcAction = None
     AIMDK_IMPORT_ERROR = exc
 
 
-MC_TOPIC = "/aima/internal/event/probe/soc0/mc"
-MC_EVENT_ID = 5004
-MC_EVENT_NAME = "MC运动状态"
+MC_SERVICE = "/aimdk_5Fmsgs/srv/GetMcAction"
+MC_POLL_INTERVAL = 1.0
+MC_STATE_SEPARATOR = " | "
+
+STATUS_NAMES = {
+    0: "IDLE",
+    100: "RUNNING",
+    200: "TRANSITION",
+}
 
 
 class MCStateCollector(Node):
-    """
-    读取机器人 MC 当前行动状态。
-
-    数据来源：
-        /aima/internal/event/probe/soc0/mc
-
-    只关注：
-        event_id = 5004
-        event_name = MC运动状态
-        attr key = mc_action
-        attr type = 2
-        attr value_string = 当前行动状态
-    """
+    """通过 GetMcAction 定时查询当前运动模式。"""
 
     def __init__(
         self,
         on_state_change: Optional[Callable[[str], None]] = None,
+        poll_interval_sec: float = MC_POLL_INTERVAL,
     ):
         super().__init__("robot_platform_mc_agent")
 
         self._on_state_change = on_state_change
 
         self._current_state: Optional[str] = None
+        self._action_desc: Optional[str] = None
+        self._status_value: Optional[int] = None
 
-        self._subscription = self.create_subscription(
-            EventProbeInfoArray,
-            MC_TOPIC,
-            self._on_event,
-            10,
+        self._pending_future = None
+        self._service_warning_logged = False
+
+        self._client = self.create_client(
+            GetMcAction,
+            MC_SERVICE,
+        )
+
+        self._timer = self.create_timer(
+            max(0.2, poll_interval_sec),
+            self._poll_state,
         )
 
         self.get_logger().info(
-            f"MC collector started: {MC_TOPIC}"
+            f"MC state collector started: "
+            f"{MC_SERVICE}, interval={poll_interval_sec}s"
         )
 
     @property
     def current_state(self) -> Optional[str]:
-        """
-        获取当前 MC 行动状态。
-        """
+        """当前组合状态，例如 RUNNING | STAND_DEFAULT。"""
         return self._current_state
 
-    def _on_event(self, message: EventProbeInfoArray):
-        """
-        处理 MC EventProbeInfoArray。
-        """
+    @property
+    def action_desc(self) -> Optional[str]:
+        """服务返回的运动模式描述。"""
+        return self._action_desc
 
-        for event in message.list:
+    @property
+    def status_value(self) -> Optional[int]:
+        """服务返回的运动模式状态枚举值。"""
+        return self._status_value
 
-            # 只关注 MC 运动状态事件
-            if event.event_id != MC_EVENT_ID:
-                continue
+    def _poll_state(self) -> None:
+        """定时查询；上一请求未结束时不重复发送。"""
+        if (
+            self._pending_future is not None
+            and not self._pending_future.done()
+        ):
+            return
 
-            if event.event_name != MC_EVENT_NAME:
-                continue
-
-            mc_action = self._extract_mc_action(event)
-
-            if not mc_action:
-                continue
-
-            # 第一次获取状态
-            if self._current_state is None:
-
-                self._current_state = mc_action
-
-                self.get_logger().info(
-                    f"[MC] Current state: {mc_action}"
+        if not self._client.service_is_ready():
+            if not self._service_warning_logged:
+                self.get_logger().warning(
+                    f"MC service not ready: {MC_SERVICE}"
                 )
+                self._service_warning_logged = True
+            return
 
-                if self._on_state_change:
-                    self._on_state_change(mc_action)
+        self._service_warning_logged = False
 
-                continue
+        request = GetMcAction.Request()
+        request.request.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
 
-            # 状态发生变化
-            if mc_action != self._current_state:
+        try:
+            self._pending_future = self._client.call_async(request)
+            self._pending_future.add_done_callback(
+                self._handle_response
+            )
+        except Exception as exc:
+            self.get_logger().error(
+                f"Failed to query MC state: {exc}"
+            )
 
-                old_state = self._current_state
+    def _handle_response(self, future) -> None:
+        """解析服务响应，并在状态变化时通知调用方。"""
+        try:
+            response = future.result()
+        except Exception as exc:
+            self.get_logger().warning(
+                f"GetMcAction request failed: {exc}"
+            )
+            return
 
-                self._current_state = mc_action
+        # 当前实测成功响应中的 header.code 为 0。
+        response_code = response.header.code
+        if response_code != 0:
+            self.get_logger().warning(
+                f"GetMcAction returned code={response_code}"
+            )
+            return
 
-                self.get_logger().info(
-                    f"[MC] State changed: "
-                    f"{old_state} -> {mc_action}"
+        info = response.info
+
+        # 注意：新版注释指出 current_action 从 v0.8.2 开始不再使用。
+        # 因此这里不把 current_action.value 当作可靠状态来源。
+        status_value = info.status.value
+        action_desc = (info.action_desc or "").strip()
+
+        status_name = STATUS_NAMES.get(
+            status_value,
+            f"UNKNOWN({status_value})",
+        )
+
+        # 保留原来的字符串回调接口，同时包含状态和模式描述。
+        if action_desc:
+            state = f"{status_name}{MC_STATE_SEPARATOR}{action_desc}"
+        else:
+            state = status_name
+
+        old_state = self._current_state
+
+        self._status_value = status_value
+        self._action_desc = action_desc or None
+        self._current_state = state
+
+        if state == old_state:
+            return
+
+        if old_state is None:
+            self.get_logger().info(
+                f"[MC] Current state: {state}"
+            )
+        else:
+            self.get_logger().info(
+                f"[MC] State changed: {old_state} -> {state}"
+            )
+
+        if self._on_state_change is not None:
+            try:
+                self._on_state_change(state)
+            except Exception as exc:
+                self.get_logger().error(
+                    f"MC state callback failed: {exc}"
                 )
-
-                if self._on_state_change:
-                    self._on_state_change(mc_action)
-
-    @staticmethod
-    def _extract_mc_action(event) -> Optional[str]:
-        """
-        从 MC 事件中提取：
-
-            key = mc_action
-            type = 2
-            value_string
-
-        """
-
-        for attr in event.attrs:
-
-            if attr.key != "mc_action":
-                continue
-
-            # EventProbeAttr:
-            # EA_TYPE_STRING = 2
-            if attr.type != 2:
-                continue
-
-            value = attr.value_string.strip()
-
-            if value:
-                return value
-
-        return None
 
 
 def start_mc_collector(
     on_state_change: Optional[Callable[[str], None]] = None,
 ):
-    """
-    启动 MC ROS 2 Collector。
-
-    返回：
-        collector
-        ros_thread
-    """
-
-    if EventProbeInfoArray is None:
+    """启动 MC 状态采集，返回 collector 和 ROS 线程。"""
+    if GetMcAction is None:
         raise RuntimeError(
-            "aimdk_msgs is not available: "
+            f"aimdk_msgs GetMcAction unavailable: "
             f"{AIMDK_IMPORT_ERROR}"
         )
 
-    rclpy.init()
+    if not rclpy.ok():
+        rclpy.init()
 
     collector = MCStateCollector(
         on_state_change=on_state_change,
@@ -172,7 +191,6 @@ def start_mc_collector(
         args=(collector,),
         daemon=True,
     )
-
     ros_thread.start()
 
     return collector, ros_thread
