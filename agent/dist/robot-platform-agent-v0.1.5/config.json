@@ -1,6 +1,0 @@
-{
-    "backend_url": "http://172.21.85.12:8000",
-    "heartbeat_interval": 5,
-    "registration_interval": 60,
-    "max_pending_events": 100000
-}
