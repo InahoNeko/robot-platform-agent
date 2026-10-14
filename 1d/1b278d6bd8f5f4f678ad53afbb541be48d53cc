@@ -1,0 +1,118 @@
+agent/main.py
+  s_5206f312c325e0::t_0b9b63bd254c84 7,12-16,185-212,217-218,220,382-383,388-394,397-399,407
+agent/mc.py.orig
+  s_5206f312c325e0::t_0b9b63bd254c84 1-195
+agent/mc.py
+  s_5206f312c325e0::t_a91f94d11b6a03 196
+  s_5206f312c325e0::t_0b9b63bd254c84 18,20-24,27-28,33,40-49,51-53,57-58,63,66-69,71-87,89-90,92,94-97,99-137,139-141
+  s_5206f312c325e0::t_f4a49de9738735 16-17
+  s_5206f312c325e0::t_8569053b874ba0 142-144
+agent/start.sh
+  s_5206f312c325e0::t_0b9b63bd254c84 153
+---
+{
+  "schema_version": "authorship/3.1.0",
+  "tlab_version": "0.13.1",
+  "base_commit_sha": "1d1b278d6bd8f5f4f678ad53afbb541be48d53cc",
+  "prompts": {},
+  "sessions": {
+    "s_15f76c52bf54f6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c42e-06d6-7ca0-92ad-aa0cf2f76407",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "InahoNeko <2252370633@qq.com>"
+    },
+    "s_5206f312c325e0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13860-1f8e-7bc1-bd37-eeaf49e0b18f",
+        "model": "deepseek-flash"
+      },
+      "human_author": "InahoNeko <2252370633@qq.com>",
+      "custom_attributes": {
+        "tlab.token_usage.cache_read_tokens": "1606144",
+        "tlab.token_usage.cache_creation_tokens": "0",
+        "tlab.token_usage.output_tokens": "39741",
+        "tlab.session_started_at": "2026-10-14T03:20:26Z",
+        "tlab.token_usage.input_tokens": "33266"
+      }
+    }
+  },
+  "changes": [
+    {
+      "new_path": "agent/mc.py.orig",
+      "additions": {
+        "ai": [
+          {
+            "session_id": "s_5206f312c325e0",
+            "lines": 195
+          }
+        ]
+      }
+    },
+    {
+      "old_path": "agent/main.py",
+      "new_path": "agent/main.py",
+      "additions": {
+        "ai": [
+          {
+            "session_id": "s_5206f312c325e0",
+            "lines": 50
+          }
+        ]
+      },
+      "deletions": {
+        "ai": [
+          {
+            "session_id": "s_5206f312c325e0",
+            "lines": 6
+          }
+        ]
+      }
+    },
+    {
+      "old_path": "agent/mc.py",
+      "new_path": "agent/mc.py",
+      "additions": {
+        "human": 31,
+        "ai": [
+          {
+            "session_id": "s_5206f312c325e0",
+            "lines": 101
+          }
+        ]
+      },
+      "deletions": {
+        "human": 113,
+        "ai": [
+          {
+            "session_id": "s_5206f312c325e0",
+            "lines": 1
+          }
+        ]
+      }
+    },
+    {
+      "old_path": "agent/start.sh",
+      "new_path": "agent/start.sh",
+      "additions": {
+        "ai": [
+          {
+            "session_id": "s_5206f312c325e0",
+            "lines": 1
+          }
+        ]
+      },
+      "deletions": {
+        "ai": [
+          {
+            "session_id": "s_5206f312c325e0",
+            "lines": 1
+          }
+        ]
+      }
+    }
+  ]
+}
