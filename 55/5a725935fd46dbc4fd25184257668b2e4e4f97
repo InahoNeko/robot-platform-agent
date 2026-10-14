@@ -1,0 +1,55 @@
+---
+{
+  "schema_version": "authorship/3.1.0",
+  "tlab_version": "0.13.1",
+  "base_commit_sha": "555a725935fd46dbc4fd25184257668b2e4e4f97",
+  "prompts": {},
+  "sessions": {
+    "s_15f76c52bf54f6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c42e-06d6-7ca0-92ad-aa0cf2f76407",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "InahoNeko <2252370633@qq.com>"
+    }
+  },
+  "changes": [
+    {
+      "old_path": "agent/dist/robot-platform-agent-v0.1.5.tar.gz.sha256",
+      "deletions": {
+        "human": 1
+      }
+    },
+    {
+      "old_path": "agent/dist/robot-platform-agent-v0.1.5/config.json",
+      "deletions": {
+        "human": 6
+      }
+    },
+    {
+      "old_path": "agent/dist/robot-platform-agent-v0.1.5/event_store.py",
+      "deletions": {
+        "human": 305
+      }
+    },
+    {
+      "old_path": "agent/dist/robot-platform-agent-v0.1.5/main.py",
+      "deletions": {
+        "human": 676
+      }
+    },
+    {
+      "old_path": "agent/dist/robot-platform-agent-v0.1.5/mc.py",
+      "deletions": {
+        "human": 178
+      }
+    },
+    {
+      "old_path": "agent/dist/robot-platform-agent-v0.1.5/start.sh",
+      "deletions": {
+        "human": 181
+      }
+    }
+  ]
+}
