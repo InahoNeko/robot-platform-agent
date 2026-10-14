@@ -36,6 +36,7 @@ echo
 
 test -f agent/main.py
 test -f agent/mc.py
+test -f agent/event_store.py
 test -f agent/start.sh
 test -f agent/config.json
 
@@ -51,6 +52,9 @@ cp agent/main.py \
     "${BUILD_DIR}/${APP_NAME}/"
 
 cp agent/mc.py \
+    "${BUILD_DIR}/${APP_NAME}/"
+
+cp agent/event_store.py \
     "${BUILD_DIR}/${APP_NAME}/"
 
 cp agent/start.sh \

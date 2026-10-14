@@ -119,16 +119,39 @@ ok "Dependencies available."
 
 
 # ============================================================
-# Check ROS 2 Humble
+# Check ROS 2
 # ============================================================
+#
+# 兼容 Humble（机器人环境）与 Jazzy（新机器）。
 
-if [ ! -d "/opt/ros/humble" ]; then
-    error "ROS 2 Humble was not found."
-    error "This Agent is designed for the robot environment."
+ROS_DISTROS_FOUND=""
+
+for ros_distro in humble jazzy; do
+
+    if [ -d "/opt/ros/${ros_distro}" ]; then
+        ROS_DISTROS_FOUND="${ROS_DISTROS_FOUND} ${ros_distro}"
+    fi
+
+done
+
+
+if [ -z "${ROS_DISTROS_FOUND}" ]; then
+
+    # 兜底：接受 /opt/ros 下任意已安装的发行版
+    ROS_DISTROS_FOUND="$(
+        ls -1 /opt/ros 2>/dev/null | tr "\n" " "
+    )"
+
+fi
+
+
+if [ -z "${ROS_DISTROS_FOUND}" ]; then
+    error "No ROS 2 installation was found in /opt/ros."
+    error "This Agent requires ROS 2 Humble or Jazzy."
     exit 1
 fi
 
-ok "ROS 2 Humble found."
+ok "ROS 2 found:${ROS_DISTROS_FOUND}"
 
 
 # ============================================================

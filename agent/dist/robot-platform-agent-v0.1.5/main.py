@@ -69,6 +69,16 @@ SYNC_BATCH_SIZE = CONFIG.get(
     100,
 )
 
+REGISTRATION_INTERVAL = CONFIG.get(
+    "registration_interval",
+    60,
+)
+
+MAX_PENDING_EVENTS = CONFIG.get(
+    "max_pending_events",
+    100_000,
+)
+
 
 # ============================================================
 # Robot Identity
@@ -301,7 +311,9 @@ def get_mac() -> str:
 # Event Store
 # ============================================================
 
-event_store = EventStore()
+event_store = EventStore(
+    max_events=MAX_PENDING_EVENTS,
+)
 
 
 # ============================================================
@@ -382,6 +394,34 @@ def register():
     )
 
 
+
+def registration_loop():
+
+    print("[Register] Retry loop started")
+
+    while True:
+
+        try:
+
+            register()
+
+        except requests.RequestException as exc:
+
+            print(
+                "[Register] Backend unavailable: "
+                f"{exc}"
+            )
+
+        except Exception as exc:
+
+            print(
+                "[Register] Unexpected error: "
+                f"{exc}"
+            )
+
+        time.sleep(REGISTRATION_INTERVAL)
+
+
 # ============================================================
 # Backend Sync
 # ============================================================
@@ -424,15 +464,25 @@ def sync_events_once() -> bool:
             "acknowledged_id"
         )
 
-        if acknowledged_id is not None:
+        if acknowledged_id is None:
+            raise ValueError("Missing acknowledged_id in sync response")
 
-            event_store.delete_until(
-                int(acknowledged_id)
+        acknowledged_id = int(acknowledged_id)
+        first_event_id = events[0]["id"]
+        last_event_id = events[-1]["id"]
+
+        if not first_event_id <= acknowledged_id <= last_event_id:
+            raise ValueError(
+                "Invalid acknowledged_id "
+                f"{acknowledged_id}; expected between "
+                f"{first_event_id} and {last_event_id}"
             )
+
+        event_store.delete_until(acknowledged_id)
 
         print(
             "[Sync] "
-            f"Uploaded {len(events)} events"
+            f"Acknowledged through event {acknowledged_id}"
         )
 
         return True
@@ -576,21 +626,15 @@ def main():
 
     # --------------------------------------------------------
     # Backend registration
-    #
-    # 注册不是数据采集的一部分。
-    # Backend 不在线时不会阻止 Agent 工作。
     # --------------------------------------------------------
 
-    try:
+    registration_thread = Thread(
+        target=registration_loop,
+        name="registration",
+        daemon=True,
+    )
 
-        register()
-
-    except requests.RequestException as exc:
-
-        print(
-            "[Register] Backend unavailable: "
-            f"{exc}"
-        )
+    registration_thread.start()
 
     # --------------------------------------------------------
     # Offline sync thread

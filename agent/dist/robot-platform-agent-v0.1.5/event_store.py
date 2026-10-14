@@ -19,8 +19,16 @@ class EventStore:
     Backend 上传成功后再删除。
     """
 
-    def __init__(self, db_file: Path = DB_FILE):
+    def __init__(
+        self,
+        db_file: Path = DB_FILE,
+        max_events: int = 100_000,
+    ):
+        if max_events < 1:
+            raise ValueError("max_events must be greater than zero")
+
         self.db_file = db_file
+        self.max_events = max_events
 
         self.db_file.parent.mkdir(
             parents=True,
@@ -137,12 +145,58 @@ class EventStore:
                     ),
                 )
 
+                self._prune(connection)
+
                 connection.commit()
 
             finally:
                 connection.close()
 
         return event_uuid
+
+    def _prune(self, connection: sqlite3.Connection):
+        """将离线队列限制在容量内，优先清理旧心跳。"""
+
+        overflow = connection.execute(
+            "SELECT COUNT(*) - ? FROM events",
+            (self.max_events,),
+        ).fetchone()[0]
+
+        if overflow <= 0:
+            return
+
+        connection.execute(
+            """
+            DELETE FROM events
+            WHERE id IN (
+                SELECT id
+                FROM events
+                WHERE event_type = 'heartbeat'
+                ORDER BY id ASC
+                LIMIT ?
+            )
+            """,
+            (overflow,),
+        )
+
+        overflow = connection.execute(
+            "SELECT COUNT(*) - ? FROM events",
+            (self.max_events,),
+        ).fetchone()[0]
+
+        if overflow > 0:
+            connection.execute(
+                """
+                DELETE FROM events
+                WHERE id IN (
+                    SELECT id
+                    FROM events
+                    ORDER BY id ASC
+                    LIMIT ?
+                )
+                """,
+                (overflow,),
+            )
 
     # ========================================================
     # Read

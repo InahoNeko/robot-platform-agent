@@ -6,9 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-WorkingDirectory=/agibot/flag/agent/current
+WorkingDirectory=/agibot/data/var/agent/current
 
-ExecStart=/bin/bash /agibot/flag/agent/current/start.sh
+ExecStart=/bin/bash /agibot/data/var/agent/current/start.sh
 
 Restart=always
 RestartSec=5

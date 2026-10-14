@@ -4,7 +4,19 @@ from typing import Callable, Optional
 import rclpy
 from rclpy.node import Node
 
-from aimdk_msgs.msg import EventProbeInfoArray
+# aimdk_msgs 由机器人环境提供。
+# 在普通 Jazzy 开发机上可能未安装，或为其他 ROS 发行版构建，
+# 此时不阻断 Agent 启动，仅关闭 MC 状态采集。
+try:
+    from aimdk_msgs.msg import EventProbeInfoArray
+
+    AIMDK_IMPORT_ERROR = None
+
+except ImportError as exc:
+
+    EventProbeInfoArray = None
+
+    AIMDK_IMPORT_ERROR = exc
 
 
 MC_TOPIC = "/aima/internal/event/probe/soc0/mc"
@@ -142,6 +154,12 @@ def start_mc_collector(
         collector
         ros_thread
     """
+
+    if EventProbeInfoArray is None:
+        raise RuntimeError(
+            "aimdk_msgs is not available: "
+            f"{AIMDK_IMPORT_ERROR}"
+        )
 
     rclpy.init()
 
